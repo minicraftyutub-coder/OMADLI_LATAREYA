@@ -4,6 +4,7 @@ import os
 import sqlite3
 import time
 from io import BytesIO
+from openpyxl import Workbook
 
 import qrcode
 from aiogram import Bot, Dispatcher, F
@@ -56,6 +57,44 @@ def connect():
     con.row_factory = sqlite3.Row
     return con
 
+
+
+def build_round_excel(round_id: int):
+    """Joriy o'yinda chipta yozuvi bor foydalanuvchilarni Excelga chiqaradi."""
+    with connect() as c:
+        rows = c.execute(
+            """SELECT t.number, t.user_id, u.name, u.phone
+               FROM tickets AS t
+               LEFT JOIN users AS u ON u.user_id = t.user_id
+               WHERE t.round_id = ?
+               ORDER BY t.created_at ASC, t.id ASC""",
+            (round_id,),
+        ).fetchall()
+    if not rows:
+        return None, 0
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Chipta egalari"
+    sheet.append(["Ism-familiya", "Telefon raqami", "Telegram ID", "Chipta raqami"])
+    for row in rows:
+        sheet.append([
+            row["name"] or "",
+            row["phone"] or "",
+            row["user_id"],
+            row["number"],
+        ])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    for column, width in {"A": 28, "B": 20, "C": 18, "D": 18}.items():
+        sheet.column_dimensions[column].width = width
+
+    output = BytesIO()
+    workbook.save(output)
+    return BufferedInputFile(
+        output.getvalue(),
+        filename=f"lotereya_{round_id}_chipta_egalari.xlsx",
+    ), len(rows)
 
 def init_db():
     with connect() as c:
@@ -438,7 +477,18 @@ async def op_action(call: CallbackQuery, state: FSMContext):
     elif action == "card":
         await call.message.answer("Karta raqamini/rekvizitini kiriting:"); await state.set_state(Operator.card)
     elif action == "stop":
-        set_setting("buying_open", "0"); await call.message.answer("⛔ Chipta olish yopildi.")
+        set_setting("buying_open", "0")
+        round_id = active_round_id()
+        report, count = build_round_excel(round_id)
+        if report:
+            await bot.send_document(
+                call.from_user.id,
+                report,
+                caption=f"⛔ {round_id}-o‘yin: chipta egalari ({count} ta chipta).",
+            )
+            await call.message.answer("⛔ Chipta olish yopildi. Excel operatorga yuborildi.")
+        else:
+            await call.message.answer("⛔ Chipta olish yopildi. Bu o‘yinda hali chipta yo‘q.")
     elif action == "open":
         set_setting("buying_open", "1"); await call.message.answer("✅ Chipta olish ochildi.")
     elif action == "broadcast":
@@ -503,6 +553,14 @@ async def confirm_action(call: CallbackQuery):
             c.execute("DELETE FROM tickets WHERE round_id=?", (active_round_id(),))
         await call.message.answer("🧹 Joriy o‘yin chiptalari o‘chirildi.")
     elif action == "new":
+        old_round_id = active_round_id()
+        report, count = build_round_excel(old_round_id)
+        if report:
+            await bot.send_document(
+                call.from_user.id,
+                report,
+                caption=f"🆕 {old_round_id}-o‘yin chipta egalari ({count} ta chipta).",
+            )
         with connect() as c:
             c.execute("UPDATE rounds SET status='closed' WHERE status='active'")
             c.execute("INSERT INTO rounds(status,created_at) VALUES('active',?)", (int(time.time()),))
