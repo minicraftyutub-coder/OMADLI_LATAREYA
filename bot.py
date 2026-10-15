@@ -186,7 +186,7 @@ def subscription_keyboard():
 
 async def send_subscription_prompt(target):
     prompt = (
-        "🔒 Botdan foydalanish uchun avval Telegram kanalimizga obuna bo‘ling.\\n\\n"
+        "🔒 Botdan foydalanish uchun avval Telegram kanalimizga obuna bo‘ling.\n\n"
         "1. «Telegram kanaliga obuna bo‘lish» tugmasini bosing.\\n"
         "2. Kanalga qo‘shiling.\\n"
         "3. Botga qaytib, «Obuna bo‘ldim — tekshirish» tugmasini bosing."
