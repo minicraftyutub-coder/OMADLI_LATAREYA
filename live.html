@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OMADLI BILET — Jonli o‘yin</title>
+<style>
+:root{color-scheme:dark;--bg:#080d18;--panel:#111a2b;--line:#26344d;--text:#f4f7ff;--muted:#9daac1;--red:#ff4058;--green:#28d99a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#162342,#080d18 55%);color:var(--text);font:15px system-ui,-apple-system,Segoe UI,sans-serif;min-height:100vh}
+header{padding:18px 20px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}h1{font-size:18px;margin:0}header small{color:var(--muted)}.livebadge{background:#451623;color:#ff8290;border-radius:20px;padding:6px 10px;font-size:12px;font-weight:800}
+main{max-width:1150px;margin:auto;padding:18px;display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:16px}.panel{background:rgba(17,26,43,.94);border:1px solid var(--line);border-radius:18px;overflow:hidden;min-width:0}.videoWrap{background:#02050a;aspect-ratio:16/9;position:relative;display:flex;align-items:center;justify-content:center}.videoWrap video{width:100%;height:100%;object-fit:contain;position:absolute;inset:0}.placeholder{color:var(--muted);text-align:center;padding:20px;z-index:1}.overlay{position:absolute;z-index:2;top:12px;left:12px;background:#111cddcc;padding:6px 9px;border-radius:8px;font-size:12px}.viewers{position:absolute;z-index:2;right:12px;top:12px;background:#101522dd;border-radius:8px;padding:6px 9px;font-size:12px}
+.controls{padding:15px;display:flex;flex-wrap:wrap;gap:9px}.btn{border:0;border-radius:11px;padding:11px 14px;font-weight:750;cursor:pointer;background:#263753;color:#fff}.btn.primary{background:var(--red)}.btn.green{background:#087d5b}.btn:disabled{opacity:.4;cursor:not-allowed}.note{padding:0 15px 15px;color:var(--muted);font-size:12px;line-height:1.5}.chatHead{padding:16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.chatHead strong{font-size:16px}.chatBody{height:390px;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}.bubble{background:#1b2940;border-radius:12px;padding:9px 11px;overflow-wrap:anywhere}.bubble b{font-size:12px;color:#82c8ff}.bubble p{margin:4px 0 0;white-space:pre-wrap}.bubble time{color:var(--muted);font-size:10px;float:right;margin-left:8px}.chatForm{padding:12px;border-top:1px solid var(--line);display:flex;gap:8px}.chatForm input{min-width:0;flex:1;background:#09111f;color:white;border:1px solid var(--line);border-radius:10px;padding:12px}.status{padding:12px 15px;color:var(--muted);font-size:13px}.countdown{font-size:72px;font-weight:900;color:#fff;text-shadow:0 0 35px #ff4058}.hidden{display:none!important}
+@media(max-width:760px){main{grid-template-columns:1fr;padding:10px}.chatBody{height:270px}header{padding:14px}.controls .btn{flex:1}.countdown{font-size:56px}}
+</style></head>
+<body>
+<header><div><h1>🎟 OMADLI BILET</h1><small>Jonli o‘yin va tomoshabinlar chati</small></div><span class="livebadge" id="liveBadge">● KUTILMOQDA</span></header>
+<main>
+<section class="panel"><div class="videoWrap" id="videoWrap"><video id="video" autoplay playsinline muted></video><div class="placeholder" id="placeholder"><div style="font-size:42px">🎥</div><b id="mainStatus">Jonli efir hali boshlanmadi</b><p id="subStatus">Admin efirni boshlashini kuting.</p><div id="countdown" class="countdown hidden">3</div></div><span class="overlay hidden" id="videoLive">🔴 LIVE</span><span class="viewers">👁 <b id="viewerCount">0</b> tomoshabin</span></div>
+<div class="controls"><button class="btn primary hidden" id="startBtn">🔴 O‘yinni boshlash</button><button class="btn hidden" id="flipBtn">🔄 Kamerani almashtirish</button><button class="btn green hidden" id="stopBtn">⛔ O‘yinni tugatish</button><button class="btn hidden" id="retryBtn">🔁 Qayta ulanish</button></div>
+<div class="note" id="adminNote">Video va chatni ko‘rish uchun shu sahifada qoling. Kameraga ruxsat so‘ralsa, brauzerda ruxsat bering.</div></section>
+<section class="panel"><div class="chatHead"><strong>💬 Jonli chat</strong><span style="font-size:12px;color:var(--muted)">Hammaga ko‘rinadi</span></div><div class="chatBody" id="chatBody"><div class="status">Chatga xush kelibsiz. Hurmat bilan yozing.</div></div><form class="chatForm" id="chatForm"><input id="chatInput" maxlength="500" placeholder="Izoh yozing..." autocomplete="off"><button class="btn green" type="submit">Yuborish</button></form></section>
+</main>
+<script>
+(()=> {
+const qs=new URLSearchParams(location.search), key=qs.get('key')||'', admin=!!key;
+const $=id=>document.getElementById(id), id=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random());
+let ws=null, stream=null, facing='user', status='off', viewers=new Set(), peers=new Map(), pendingViewers=new Set(), reconnectTimer=null;
+$('startBtn').classList.toggle('hidden',!admin);$('flipBtn').classList.toggle('hidden',!admin);$('stopBtn').classList.toggle('hidden',!admin);$('retryBtn').classList.toggle('hidden',admin);
+$('adminNote').textContent=admin?'Admin rejimi: kameraga ruxsat bering, keyin «O‘yinni boshlash»ni bosing.':'Tomosha qilish uchun LIVE boshlanishini kuting. Izohlaringiz barcha tomoshabinlarga ko‘rinadi.';
+$('chatInput').placeholder=admin?'Admin sifatida izoh yozing...':'Izoh yozing...';
+function badge(s){const map={off:['● KUTILMOQDA',''],countdown:['● SANОQ',''],live:['● LIVE',''],ended:['● YAKUNLANDI','']};const x=map[s]||map.off;$('liveBadge').textContent=x[0];$('liveBadge').style.background=s==='live'?'#123d30':s==='ended'?'#252b38':'#451623';$('liveBadge').style.color=s==='live'?'#55edb0':s==='ended'?'#aab3c4':'#ff8290'}
+function showStatus(title,sub){$('mainStatus').textContent=title;$('subStatus').textContent=sub}
+function addChat(item){const d=document.createElement('div');d.className='bubble';const b=document.createElement('b');b.textContent=item.name||'Tomoshabin';const t=document.createElement('time');t.textContent=item.time||'';const p=document.createElement('p');p.textContent=item.text||'';d.append(b,t,p);$('chatBody').append(d);$('chatBody').scrollTop=$('chatBody').scrollHeight}
+function send(obj){if(ws&&ws.readyState===WebSocket.OPEN)ws.send(JSON.stringify(obj))}
+function connect(){const proto=location.protocol==='https:'?'wss:':'ws:';ws=new WebSocket(proto+'//'+location.host+'/ws/live'+(admin?'?key='+encodeURIComponent(key):''));ws.onopen=()=>send({type:'hello',id,admin,name:admin?'Admin':'Tomoshabin'});ws.onmessage=async ev=>{let m;try{m=JSON.parse(ev.data)}catch{return}
+if(m.type==='error'){showStatus('Xatolik',m.message);alert(m.message)}
+if(m.type==='state'){status=m.status;badge(status);if(status==='live'){showStatus('🔴 Jonli efir','Ulanmoqda...');$('videoLive').classList.remove('hidden')}else if(status==='countdown'){showStatus('O‘yin boshlanmoqda','3 soniyalik sanoq...')}else if(status==='off'){showStatus('Jonli efir hali boshlanmadi','Admin efirni boshlashini kuting.')} }
+if(m.type==='history'){m.items.forEach(addChat)}
+if(m.type==='viewers'){$('viewerCount').textContent=m.count}
+if(m.type==='chat')addChat(m.item);
+if(m.type==='countdown'){status='countdown';badge(status);$('countdown').classList.remove('hidden');$('videoLive').classList.add('hidden');showStatus('Jonli o‘yin boshlandi!','Efir bir necha soniyada ochiladi.');for(let n=3;n>=1;n--){$('countdown').textContent=n;await new Promise(r=>setTimeout(r,1000));if(status!=='countdown')break}$('countdown').classList.add('hidden')}
+if(m.type==='live'){status='live';badge(status);$('videoLive').classList.remove('hidden');$('placeholder').classList.add('hidden');showStatus('🔴 LIVE','Jonli efirga ulandingiz.');if(admin){for(const vid of pendingViewers)createOffer(vid);pendingViewers.clear()}else{$('retryBtn').classList.remove('hidden')}}
+if(m.type==='ended'){status='ended';badge(status);$('videoLive').classList.add('hidden');$('placeholder').classList.remove('hidden');$('countdown').classList.add('hidden');showStatus('⛔ Jonli o‘yin tugadi','Barchangizga rahmat!');if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}for(const p of peers.values())p.close();peers.clear();pendingViewers.clear();$('video').srcObject=null;$('retryBtn').classList.add('hidden')}
+if(m.type==='viewer_join'&&admin){if(status==='live')createOffer(m.id);else pendingViewers.add(m.id)}
+if(m.type==='offer'&&!admin)await handleOffer(m);
+if(m.type==='answer'&&admin){const p=peers.get(m.from);if(p&&m.description)await p.setRemoteDescription(m.description)}
+if(m.type==='ice'&&m.candidate){const p=peers.get(m.from);if(p)try{await p.addIceCandidate(m.candidate)}catch{}}
+};ws.onclose=()=>{if(!reconnectTimer)reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect()},2500)}}
+async function ensureCamera(){if(stream)return stream;stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},audio:true});$('video').srcObject=stream;return stream}
+function makePeer(target){const p=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun.cloudflare.com:3478'}]});peers.set(target,p);if(admin&&stream)stream.getTracks().forEach(t=>p.addTrack(t,stream));p.onicecandidate=e=>{if(e.candidate)send({type:'ice',to:target,candidate:e.candidate})};if(!admin)p.ontrack=e=>{ $('video').srcObject=e.streams[0];$('placeholder').classList.add('hidden');$('videoLive').classList.remove('hidden')};p.onconnectionstatechange=()=>{if(p.connectionState==='failed'||p.connectionState==='closed'){p.close();peers.delete(target)}};return p}
+async function createOffer(target){if(!stream||peers.has(target))return;try{const p=makePeer(target);const offer=await p.createOffer();await p.setLocalDescription(offer);send({type:'offer',to:target,description:p.localDescription})}catch(e){console.error(e)}}
+async function handleOffer(m){try{const p=makePeer(m.from);await p.setRemoteDescription(m.description);const answer=await p.createAnswer();await p.setLocalDescription(answer);send({type:'answer',to:m.from,description:p.localDescription})}catch(e){showStatus('Video ulanmagan','Qayta ulanishni bosing.');console.error(e)}}
+$('startBtn').onclick=async()=>{try{if(!navigator.mediaDevices?.getUserMedia)throw Error('Kamera uchun HTTPS va zamonaviy brauzer kerak.');await ensureCamera();$('startBtn').disabled=true;send({type:'admin_start'});showStatus('O‘yin boshlanmoqda','Tomoshabinlarga xabar yuborildi...')}catch(e){alert('Kamera ochilmadi: '+e.message);$('startBtn').disabled=false}};
+$('flipBtn').onclick=async()=>{try{const old=stream;facing=facing==='user'?'environment':'user';stream=null;const next=await ensureCamera();const tracks=next.getTracks();for(const p of peers.values())for(const sender of p.getSenders()){const replacement=tracks.find(t=>t.kind===sender.track?.kind);if(replacement)await sender.replaceTrack(replacement)}if(old)old.getTracks().forEach(t=>t.stop())}catch(e){alert('Kamerani almashtirib bo‘lmadi: '+e.message)}};
+$('stopBtn').onclick=()=>{if(confirm('Jonli o‘yinni tugatasizmi?'))send({type:'admin_stop'})};
+$('retryBtn').onclick=()=>{if(ws){ws.close()}for(const p of peers.values())p.close();peers.clear();connect()};
+$('chatForm').onsubmit=e=>{e.preventDefault();const input=$('chatInput'),text=input.value.trim();if(!text)return;send({type:'chat',text});input.value=''};
+if(!admin&&location.protocol!=='https:')showStatus('HTTPS kerak','Kamera va jonli video xavfsiz HTTPS sahifada ishlaydi.');
+connect();
+})();
+</script></body></html>
