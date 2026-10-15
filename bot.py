@@ -759,7 +759,10 @@ async def start_web_server():
     # Render Web Service uchun PORT muhit o'zgaruvchisida beriladi.
     port = int(os.getenv("PORT", "10000"))
     app = web.Application()
-    app.router.add_get("/live", live_page)\n    app.router.add_get("/live.html", live_page)\n    app.router.add_get("/ws/live", live_websocket)\n    app.router.add_get("/", health_check)
+    app.router.add_get("/live", live_page)
+    app.router.add_get("/live.html", live_page)
+    app.router.add_get("/ws/live", live_websocket)
+    app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
     runner = web.AppRunner(app)
     await runner.setup()
