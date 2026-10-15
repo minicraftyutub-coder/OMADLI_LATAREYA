@@ -163,6 +163,7 @@ def operator_menu():
         [InlineKeyboardButton(text="💵 Chipta narxi", callback_data="op:price"), InlineKeyboardButton(text="💳 Karta raqami", callback_data="op:card")],
         [InlineKeyboardButton(text="⛔ Chipta olishni to‘xtatish", callback_data="op:stop"), InlineKeyboardButton(text="✅ Chipta olishni ochish", callback_data="op:open")],
         [InlineKeyboardButton(text="📣 Hammaga xabar", callback_data="op:broadcast")],
+        [InlineKeyboardButton(text="🎥 Jonli LIVE", callback_data="op:live")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="op:stats")],
         [InlineKeyboardButton(text="🧹 Joriy o‘yin chiptalarini o‘chirish", callback_data="op:clear")],
         [InlineKeyboardButton(text="🆕 Yangi o‘yin boshlash", callback_data="op:newround")],
@@ -493,6 +494,26 @@ async def op_action(call: CallbackQuery, state: FSMContext):
         set_setting("buying_open", "1"); await call.message.answer("✅ Chipta olish ochildi.")
     elif action == "broadcast":
         await call.message.answer("Barcha foydalanuvchilarga yuboriladigan matn yoki rasmni yuboring."); await state.set_state(Operator.broadcast)
+    elif action == "live":
+        base_url = os.getenv("PUBLIC_URL", "https://omadli-latareya.onrender.com").rstrip("/")
+        live_key = os.getenv("LIVE_ADMIN_KEY", "").strip()
+        if not live_key:
+            await call.message.answer("⚠️ Render → Environment bo‘limida LIVE_ADMIN_KEY nomli maxfiy kalit yarating. Masalan, uzun tasodifiy matn. Saqlagach servisni qayta ishga tushiring.")
+        else:
+            admin_url = f"{base_url}/live?key={live_key}"
+            public_url = f"{base_url}/live"
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="📣 Hammaga LIVE havolasini yuborish", callback_data="live:announce")],
+                [InlineKeyboardButton(text="⛔ LIVE ni tugatish", callback_data="live:stop")],
+            ])
+            await call.message.answer(
+                "🎥 LIVE BOSHQARUVI\\n\\n"
+                f"👑 Admin kamera sahifasi: {admin_url}\\n"
+                f"👥 Tomoshabinlar havolasi: {public_url}\\n\\n"
+                "Admin havolasini boshqalarga yubormang. Kamera sahifasini ochib, «O‘yinni boshlash» tugmasini bosing.",
+                reply_markup=kb,
+                disable_web_page_preview=True,
+            )
     elif action == "stats":
         with connect() as c:
             users = c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
@@ -506,6 +527,27 @@ async def op_action(call: CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Ha, yangi o‘yin", callback_data="confirm:new"), InlineKeyboardButton(text="Bekor qilish", callback_data="confirm:cancel")]])
         await call.message.answer("Yangi o‘yin boshlash va hammaga xabar yuborishni tasdiqlaysizmi?", reply_markup=kb)
     await call.answer()
+
+
+@dp.callback_query(F.data == "live:announce")
+async def live_announce(call: CallbackQuery):
+    if not is_operator(call.from_user.id):
+        await call.answer("Ruxsat yo‘q.", show_alert=True); return
+    base_url = os.getenv("PUBLIC_URL", "https://omadli-latareya.onrender.com").rstrip("/")
+    count = await broadcast_all(
+        "🎥 Jonli o‘yin sahifasi tayyor! LIVE boshlanganda shu havolani oching: " + base_url + "/live"
+    )
+    await call.message.answer(f"📣 LIVE sahifasi havolasi {count} ta foydalanuvchiga yuborildi.")
+    await call.answer("Havola yuborildi")
+
+
+@dp.callback_query(F.data == "live:stop")
+async def live_stop_from_bot(call: CallbackQuery):
+    if not is_operator(call.from_user.id):
+        await call.answer("Ruxsat yo‘q.", show_alert=True); return
+    await stop_live_session()
+    await call.message.answer("⛔ LIVE yakunlandi. Tomoshabinlar sahifasidagi video va chat yopildi.")
+    await call.answer("LIVE tugatildi")
 
 
 @dp.message(Operator.price)
@@ -575,6 +617,140 @@ async def show_id(message: Message):
     await message.answer(f"Telegram ID: {message.from_user.id}")
 
 
+# ======================== JONLI LIVE SAHIFA ========================
+LIVE_ADMIN_KEY = os.getenv("LIVE_ADMIN_KEY", "").strip()
+LIVE_STATE = {"status": "off", "started_at": 0}
+LIVE_CLIENTS = {}  # websocket -> {id, admin, name}
+LIVE_CHAT = []
+LIVE_LOCK = asyncio.Lock()
+
+
+async def live_send(ws, payload):
+    try:
+        if not ws.closed:
+            await ws.send_json(payload)
+    except Exception:
+        pass
+
+
+async def live_broadcast(payload):
+    clients = list(LIVE_CLIENTS.keys())
+    if clients:
+        await asyncio.gather(*(live_send(ws, payload) for ws in clients), return_exceptions=True)
+
+
+async def live_viewer_count():
+    return sum(1 for info in LIVE_CLIENTS.values() if not info.get("admin"))
+
+
+async def stop_live_session():
+    LIVE_STATE.update(status="off", started_at=0)
+    await live_broadcast({"type": "ended"})
+    # Close peer signaling connections; browsers also stop their local media when they receive ended.
+    return True
+
+
+async def live_page(request: web.Request):
+    from pathlib import Path
+    path = Path(__file__).resolve().parent / "live.html"
+    if not path.exists():
+        return web.Response(text="live.html fayli topilmadi", status=500)
+    return web.FileResponse(path)
+
+
+async def live_websocket(request: web.Request):
+    ws = web.WebSocketResponse(heartbeat=25, max_msg_size=16 * 1024)
+    await ws.prepare(request)
+    key = request.query.get("key", "")
+    is_admin_client = bool(LIVE_ADMIN_KEY) and key == LIVE_ADMIN_KEY
+    if not LIVE_ADMIN_KEY:
+        await ws.send_json({"type": "error", "message": "LIVE_ADMIN_KEY Render Environment sozlamasida kiritilmagan."})
+        await ws.close()
+        return ws
+
+    async for msg in ws:
+        if msg.type != web.WSMsgType.TEXT:
+            if msg.type in (web.WSMsgType.ERROR, web.WSMsgType.CLOSE):
+                break
+            continue
+        try:
+            data = msg.json()
+        except Exception:
+            continue
+        kind = data.get("type")
+        if kind == "hello":
+            if data.get("admin") and not is_admin_client:
+                await ws.send_json({"type": "error", "message": "Admin ruxsati yo‘q."})
+                await ws.close()
+                break
+            LIVE_CLIENTS[ws] = {
+                "id": str(data.get("id", ""))[:80],
+                "admin": is_admin_client,
+                "name": ("Admin" if is_admin_client else str(data.get("name", "Tomoshabin"))[:40]),
+            }
+            await live_send(ws, {"type": "state", "status": LIVE_STATE["status"]})
+            await live_send(ws, {"type": "history", "items": LIVE_CHAT[-60:]})
+            await live_broadcast({"type": "viewers", "count": await live_viewer_count()})
+            if not is_admin_client and LIVE_STATE["status"] == "live":
+                for admin_ws, info in list(LIVE_CLIENTS.items()):
+                    if info.get("admin"):
+                        await live_send(admin_ws, {"type": "viewer_join", "id": LIVE_CLIENTS[ws]["id"]})
+            continue
+        if ws not in LIVE_CLIENTS:
+            continue
+        sender = LIVE_CLIENTS[ws]
+        if kind == "admin_start":
+            if not sender.get("admin"):
+                await live_send(ws, {"type": "error", "message": "Faqat admin LIVE boshlashi mumkin."})
+                continue
+            if LIVE_STATE["status"] != "off":
+                await live_send(ws, {"type": "error", "message": "LIVE allaqachon boshlangan."})
+                continue
+            LIVE_STATE.update(status="countdown", started_at=int(time.time()))
+            base_url = os.getenv("PUBLIC_URL", "https://omadli-latareya.onrender.com").rstrip("/")
+            await broadcast_all("🔴 JONLI O‘YIN BOSHLANDI! 3 soniyalik sanoqdan keyin LIVE ochiladi: " + base_url + "/live")
+            await live_broadcast({"type": "countdown", "seconds": 3})
+            async def countdown_finish():
+                await asyncio.sleep(3)
+                if LIVE_STATE["status"] == "countdown":
+                    LIVE_STATE.update(status="live", started_at=int(time.time()))
+                    await live_broadcast({"type": "live"})
+                    for admin_ws, info in list(LIVE_CLIENTS.items()):
+                        if info.get("admin"):
+                            for viewer_ws, viewer_info in list(LIVE_CLIENTS.items()):
+                                if not viewer_info.get("admin"):
+                                    await live_send(admin_ws, {"type": "viewer_join", "id": viewer_info["id"]})
+            asyncio.create_task(countdown_finish())
+        elif kind == "admin_stop":
+            if not sender.get("admin"):
+                await live_send(ws, {"type": "error", "message": "Faqat admin efirni tugatishi mumkin."})
+                continue
+            await stop_live_session()
+            await broadcast_all("⛔ Jonli o‘yin yakunlandi. Barchangizga rahmat!")
+        elif kind == "chat":
+            text = str(data.get("text", "")).strip()
+            if not text or len(text) > 500:
+                continue
+            item = {"name": sender["name"], "text": text, "time": time.strftime("%H:%M")}
+            LIVE_CHAT.append(item)
+            del LIVE_CHAT[:-100]
+            await live_broadcast({"type": "chat", "item": item})
+        elif kind in ("offer", "answer", "ice"):
+            if kind == "offer" and not sender.get("admin"):
+                continue
+            target_id = str(data.get("to", ""))[:80]
+            for target_ws, target_info in list(LIVE_CLIENTS.items()):
+                if target_info.get("id") == target_id:
+                    await live_send(target_ws, {
+                        "type": kind, "from": sender["id"], "description": data.get("description"),
+                        "candidate": data.get("candidate")
+                    })
+                    break
+    LIVE_CLIENTS.pop(ws, None)
+    await live_broadcast({"type": "viewers", "count": await live_viewer_count()})
+    return ws
+
+
 async def health_check(request: web.Request):
     return web.Response(text="OK - OMADLI BILET bot ishlayapti", status=200)
 
@@ -583,7 +759,7 @@ async def start_web_server():
     # Render Web Service uchun PORT muhit o'zgaruvchisida beriladi.
     port = int(os.getenv("PORT", "10000"))
     app = web.Application()
-    app.router.add_get("/", health_check)
+    app.router.add_get("/live", live_page)\n    app.router.add_get("/live.html", live_page)\n    app.router.add_get("/ws/live", live_websocket)\n    app.router.add_get("/", health_check)
     app.router.add_get("/health", health_check)
     runner = web.AppRunner(app)
     await runner.setup()
