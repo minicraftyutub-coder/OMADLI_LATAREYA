@@ -7,7 +7,7 @@ from io import BytesIO
 from openpyxl import Workbook
 
 import qrcode
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -163,7 +163,6 @@ def operator_menu():
         [InlineKeyboardButton(text="💵 Chipta narxi", callback_data="op:price"), InlineKeyboardButton(text="💳 Karta raqami", callback_data="op:card")],
         [InlineKeyboardButton(text="⛔ Chipta olishni to‘xtatish", callback_data="op:stop"), InlineKeyboardButton(text="✅ Chipta olishni ochish", callback_data="op:open")],
         [InlineKeyboardButton(text="📣 Hammaga xabar", callback_data="op:broadcast")],
-        [InlineKeyboardButton(text="🎥 Jonli LIVE", callback_data="op:live")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="op:stats")],
         [InlineKeyboardButton(text="🧹 Joriy o‘yin chiptalarini o‘chirish", callback_data="op:clear")],
         [InlineKeyboardButton(text="🆕 Yangi o‘yin boshlash", callback_data="op:newround")],
@@ -173,6 +172,70 @@ def operator_menu():
 def get_user(user_id):
     with connect() as c:
         return c.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+
+CHANNEL_USERNAME = "@OMADLI_BILET_1"
+CHANNEL_URL = "https://t.me/OMADLI_BILET_1"
+
+
+def subscription_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📢 Telegram kanaliga obuna bo‘lish", url=CHANNEL_URL)],
+        [InlineKeyboardButton(text="✅ Obuna bo‘ldim — tekshirish", callback_data="subscription:check")],
+    ])
+
+
+async def send_subscription_prompt(target):
+    prompt = (
+        "🔒 Botdan foydalanish uchun avval Telegram kanalimizga obuna bo‘ling.\\n\\n"
+        "1. «Telegram kanaliga obuna bo‘lish» tugmasini bosing.\\n"
+        "2. Kanalga qo‘shiling.\\n"
+        "3. Botga qaytib, «Obuna bo‘ldim — tekshirish» tugmasini bosing."
+    )
+    if isinstance(target, Message):
+        await target.answer(prompt, reply_markup=subscription_keyboard())
+    else:
+        await target.message.answer(prompt, reply_markup=subscription_keyboard())
+
+
+async def is_subscribed(user_id):
+    member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
+    if member.status in {"creator", "administrator", "member"}:
+        return True
+    return member.status == "restricted" and bool(getattr(member, "is_member", False))
+
+
+class SubscriptionMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        user = getattr(event, "from_user", None)
+        if not user or is_operator(user.id) or not get_user(user.id):
+            return await handler(event, data)
+        if isinstance(event, CallbackQuery) and event.data == "subscription:check":
+            return await handler(event, data)
+        try:
+            if await is_subscribed(user.id):
+                return await handler(event, data)
+        except Exception:
+            warning = (
+                "⚠️ Obunani tekshirib bo‘lmadi. Botni @OMADLI_BILET_1 kanaliga administrator qilib qo‘shing, "
+                "keyin qayta urinib ko‘ring."
+            )
+            if isinstance(event, Message):
+                await event.answer(warning)
+            elif isinstance(event, CallbackQuery):
+                await event.answer(warning, show_alert=True)
+            return None
+        if isinstance(event, Message):
+            await send_subscription_prompt(event)
+        elif isinstance(event, CallbackQuery):
+            await event.answer("Davom etish uchun kanalga obuna bo‘ling.", show_alert=True)
+            await send_subscription_prompt(event)
+        return None
+
+
+dp.message.middleware(SubscriptionMiddleware())
+dp.callback_query.middleware(SubscriptionMiddleware())
+
+
 
 
 def ticket_taken(number):
@@ -205,6 +268,30 @@ async def broadcast_all(text, photo_id=None):
         except Exception:
             pass
     return sent
+
+
+@dp.callback_query(F.data == "subscription:check")
+async def subscription_check(call: CallbackQuery):
+    if not get_user(call.from_user.id):
+        await call.answer("Avval /start orqali ro‘yxatdan o‘ting.", show_alert=True)
+        return
+    if is_operator(call.from_user.id):
+        await call.message.answer("Operator paneli:", reply_markup=user_menu(call.from_user.id))
+        await call.answer()
+        return
+    try:
+        subscribed = await is_subscribed(call.from_user.id)
+    except Exception:
+        await call.answer(
+            "Obunani tekshirib bo‘lmadi. Botni @OMADLI_BILET_1 kanaliga administrator qilib qo‘shish kerak.",
+            show_alert=True,
+        )
+        return
+    if not subscribed:
+        await call.answer("Kanalga obuna bo‘lganingiz ko‘rinmayapti. Obuna bo‘lib, yana tekshiring.", show_alert=True)
+        return
+    await call.message.answer("✅ Obunangiz tasdiqlandi. Botdan foydalanishingiz mumkin.", reply_markup=user_menu(call.from_user.id))
+    await call.answer("Obuna tasdiqlandi!")
 
 
 @dp.message(CommandStart())
@@ -260,7 +347,8 @@ async def registration_phone(message: Message, state: FSMContext):
         c.execute("INSERT OR REPLACE INTO users(user_id,name,phone,created_at) VALUES(?,?,?,?)",
                   (message.from_user.id, data["name"], phone, int(time.time())))
     await state.clear()
-    await message.answer("✅ Ro‘yxatdan o‘tish yakunlandi!", reply_markup=user_menu(message.from_user.id))
+    await message.answer("✅ Ro‘yxatdan o‘tish yakunlandi!")
+    await send_subscription_prompt(message)
 
 
 @dp.message(F.text == "🎟 Mening chiptalarim")
@@ -494,26 +582,6 @@ async def op_action(call: CallbackQuery, state: FSMContext):
         set_setting("buying_open", "1"); await call.message.answer("✅ Chipta olish ochildi.")
     elif action == "broadcast":
         await call.message.answer("Barcha foydalanuvchilarga yuboriladigan matn yoki rasmni yuboring."); await state.set_state(Operator.broadcast)
-    elif action == "live":
-        base_url = os.getenv("PUBLIC_URL", "https://omadli-latareya.onrender.com").rstrip("/")
-        live_key = os.getenv("LIVE_ADMIN_KEY", "").strip()
-        if not live_key:
-            await call.message.answer("⚠️ Render → Environment bo‘limida LIVE_ADMIN_KEY nomli maxfiy kalit yarating. Masalan, uzun tasodifiy matn. Saqlagach servisni qayta ishga tushiring.")
-        else:
-            admin_url = f"{base_url}/live?key={live_key}"
-            public_url = f"{base_url}/live"
-            kb = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📣 Hammaga LIVE havolasini yuborish", callback_data="live:announce")],
-                [InlineKeyboardButton(text="⛔ LIVE ni tugatish", callback_data="live:stop")],
-            ])
-            await call.message.answer(
-                "🎥 LIVE BOSHQARUVI\n\n"
-                f"👑 Admin kamera sahifasi: {admin_url}\n"
-                f"👥 Tomoshabinlar havolasi: {public_url}\n\n"
-                "Admin havolasini boshqalarga yubormang. Kamera sahifasini ochib, «O‘yinni boshlash» tugmasini bosing.",
-                reply_markup=kb,
-                disable_web_page_preview=True,
-            )
     elif action == "stats":
         with connect() as c:
             users = c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
@@ -527,27 +595,6 @@ async def op_action(call: CallbackQuery, state: FSMContext):
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Ha, yangi o‘yin", callback_data="confirm:new"), InlineKeyboardButton(text="Bekor qilish", callback_data="confirm:cancel")]])
         await call.message.answer("Yangi o‘yin boshlash va hammaga xabar yuborishni tasdiqlaysizmi?", reply_markup=kb)
     await call.answer()
-
-
-@dp.callback_query(F.data == "live:announce")
-async def live_announce(call: CallbackQuery):
-    if not is_operator(call.from_user.id):
-        await call.answer("Ruxsat yo‘q.", show_alert=True); return
-    base_url = os.getenv("PUBLIC_URL", "https://omadli-latareya.onrender.com").rstrip("/")
-    count = await broadcast_all(
-        "🎥 Jonli o‘yin sahifasi tayyor! LIVE boshlanganda shu havolani oching: " + base_url + "/live"
-    )
-    await call.message.answer(f"📣 LIVE sahifasi havolasi {count} ta foydalanuvchiga yuborildi.")
-    await call.answer("Havola yuborildi")
-
-
-@dp.callback_query(F.data == "live:stop")
-async def live_stop_from_bot(call: CallbackQuery):
-    if not is_operator(call.from_user.id):
-        await call.answer("Ruxsat yo‘q.", show_alert=True); return
-    await stop_live_session()
-    await call.message.answer("⛔ LIVE yakunlandi. Tomoshabinlar sahifasidagi video va chat yopildi.")
-    await call.answer("LIVE tugatildi")
 
 
 @dp.message(Operator.price)
