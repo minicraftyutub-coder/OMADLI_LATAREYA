@@ -15,6 +15,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton, BufferedInputFile
 )
 from dotenv import load_dotenv
+from aiohttp import web
 
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
@@ -516,10 +517,32 @@ async def show_id(message: Message):
     await message.answer(f"Telegram ID: {message.from_user.id}")
 
 
+async def health_check(request: web.Request):
+    return web.Response(text="OK - OMADLI BILET bot ishlayapti", status=200)
+
+
+async def start_web_server():
+    # Render Web Service uchun PORT muhit o'zgaruvchisida beriladi.
+    port = int(os.getenv("PORT", "10000"))
+    app = web.Application()
+    app.router.add_get("/", health_check)
+    app.router.add_get("/health", health_check)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, host="0.0.0.0", port=port)
+    await site.start()
+    log.info("HTTP health server 0.0.0.0:%s portida ishga tushdi", port)
+    return runner
+
+
 async def main():
     init_db()
+    runner = await start_web_server()
     log.info("Lotereya bot ishga tushdi")
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    finally:
+        await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
