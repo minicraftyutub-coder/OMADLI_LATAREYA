@@ -507,9 +507,9 @@ async def op_action(call: CallbackQuery, state: FSMContext):
                 [InlineKeyboardButton(text="⛔ LIVE ni tugatish", callback_data="live:stop")],
             ])
             await call.message.answer(
-                "🎥 LIVE BOSHQARUVI\\n\\n"
-                f"👑 Admin kamera sahifasi: {admin_url}\\n"
-                f"👥 Tomoshabinlar havolasi: {public_url}\\n\\n"
+                "🎥 LIVE BOSHQARUVI\n\n"
+                f"👑 Admin kamera sahifasi: {admin_url}\n"
+                f"👥 Tomoshabinlar havolasi: {public_url}\n\n"
                 "Admin havolasini boshqalarga yubormang. Kamera sahifasini ochib, «O‘yinni boshlash» tugmasini bosing.",
                 reply_markup=kb,
                 disable_web_page_preview=True,
