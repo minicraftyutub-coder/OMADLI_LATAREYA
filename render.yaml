@@ -1,9 +1,10 @@
 services:
   - type: web
-    name: lotereya-telegram-bot
+    name: OMADLI_LATAREYA
     runtime: python
+    numInstances: 1
     buildCommand: pip install -r requirements.txt
-    startCommand: python bot.py
+    startCommand: python -u bot.py
     healthCheckPath: /health
     envVars:
       - key: BOT_TOKEN
