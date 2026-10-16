@@ -798,8 +798,13 @@ async def live_websocket(request: web.Request):
     return ws
 
 
+BOT_POLLING_ACTIVE = False
+
+
 async def health_check(request: web.Request):
-    return web.Response(text="OK - OMADLI BILET bot ishlayapti", status=200)
+    if not BOT_POLLING_ACTIVE:
+        return web.Response(text="Bot polling hali ishga tushmagan yoki to‘xtagan", status=503)
+    return web.Response(text="OK - OMADLI BILET bot jarayoni ishlayapti", status=200)
 
 
 async def start_web_server():
@@ -820,13 +825,22 @@ async def start_web_server():
 
 
 async def main():
+    global BOT_POLLING_ACTIVE
     init_db()
     runner = await start_web_server()
-    log.info("Lotereya bot ishga tushdi")
     try:
-        await dp.start_polling(bot)
+        me = await bot.get_me()
+        log.info("Telegram bot token tekshirildi: @%s (ID: %s)", me.username, me.id)
+        BOT_POLLING_ACTIVE = True
+        log.info("Lotereya bot pollingni boshlayapti")
+        await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    except Exception:
+        log.exception("Bot asosiy ishga tushirish jarayonida xatoga uchradi")
+        raise
     finally:
+        BOT_POLLING_ACTIVE = False
         await runner.cleanup()
+        await bot.session.close()
 
 if __name__ == "__main__":
     asyncio.run(main())
