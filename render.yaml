@@ -17,3 +17,5 @@ services:
         value: https://omadli-latareya.onrender.com
       - key: LIVE_ADMIN_KEY
         sync: false
+      - key: RANDOM_SITE_KEY
+        sync: false
