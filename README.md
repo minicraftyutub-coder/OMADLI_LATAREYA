@@ -7,6 +7,7 @@
 - To‘lov chekini yuborish, operator tasdiqlashi/rad etishi
 - Mening chiptalarim, adminga matn/rasm yuborish va javob olish
 - Operator: narx, karta rekviziti, chipta olishni ochish/yopish, statistika
+- `/random` sahifasida sayt orqali random: faqat tasdiqlangan biletlar, g‘olibni bazaga yozish va Telegram xabari
 - Barcha foydalanuvchilarga matn/rasm yuborish
 - Joriy o‘yin chiptalarini o‘chirish va yangi o‘yin boshlash
 
@@ -28,8 +29,9 @@ Bot ishga tushgach, botga `/id` yuboring. Chiqqan raqamni `.env` ichidagi `ADMIN
 2. Render’da Blueprint orqali `render.yaml` ni tanlang yoki Python Worker yarating.
 3. Build command: `pip install -r requirements.txt`
 4. Start command: `python bot.py`
-5. Environment Variables ichida `BOT_TOKEN` va `ADMIN_IDS` ni kiriting.
-6. Ma’lumotlar saqlanib qolishi uchun Render persistent disk ulang va `DATABASE_PATH` ni shu disk ichidagi yo‘lga sozlang. Oddiy vaqtinchalik diskda SQLite ma’lumotlari deploy paytida yo‘qolishi mumkin.
+5. Environment Variables ichida `BOT_TOKEN`, `ADMIN_IDS` va tasodifiy uzun maxfiy `RANDOM_SITE_KEY` qiymatini kiriting. Sayt: `https://SIZNING-SERVICE.onrender.com/random`. Saytda aynan shu `RANDOM_SITE_KEY` bilan ulaning.
+6. Random sayt bot bilan bir Render web service va bir xil `DATABASE_PATH` dan foydalanishi kerak.
+7. Ma’lumotlar saqlanib qolishi uchun Render persistent disk ulang va `DATABASE_PATH` ni shu disk ichidagi yo‘lga sozlang. Oddiy vaqtinchalik diskda SQLite ma’lumotlari deploy paytida yo‘qolishi mumkin.
 
 ## Muhim
 - QR-kod hozircha karta rekviziti matnini kodlaydi; u bank to‘lovini avtomatik tekshirmaydi. Operator bank ilovasidan tekshirishi kerak.
