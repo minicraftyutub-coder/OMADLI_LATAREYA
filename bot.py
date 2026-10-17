@@ -114,6 +114,11 @@ def init_db():
             number TEXT NOT NULL, user_id INTEGER NOT NULL, status TEXT NOT NULL,
             created_at INTEGER NOT NULL, expires_at INTEGER, receipt_file_id TEXT,
             UNIQUE(round_id, number, status))""")
+        c.execute("""CREATE TABLE IF NOT EXISTS random_winners(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, round_id INTEGER NOT NULL,
+            ticket_id INTEGER NOT NULL, user_id INTEGER NOT NULL, number TEXT NOT NULL,
+            prize TEXT NOT NULL, created_at INTEGER NOT NULL,
+            UNIQUE(round_id, ticket_id), UNIQUE(round_id, user_id))""")
         c.execute("""CREATE TABLE IF NOT EXISTS support_messages(
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
             message TEXT, created_at INTEGER NOT NULL)""")
@@ -947,10 +952,117 @@ async def health_check(request: web.Request):
     return web.Response(text="OK - OMADLI BILET bot jarayoni ishlayapti", status=200)
 
 
+async def random_page(request: web.Request):
+    from pathlib import Path
+    path = Path(__file__).resolve().parent / "random.html"
+    if not path.exists():
+        return web.Response(text="random.html fayli topilmadi", status=500)
+    return web.FileResponse(path)
+
+
+def random_site_authorized(request: web.Request) -> bool:
+    expected = os.getenv("RANDOM_SITE_KEY", "").strip()
+    supplied = request.headers.get("Authorization", "")
+    return bool(expected) and supplied == f"Bearer {expected}"
+
+
+async def random_site_state(request: web.Request):
+    if not random_site_authorized(request):
+        return web.json_response({"error": "Kalit noto‘g‘ri yoki RANDOM_SITE_KEY sozlanmagan."}, status=401)
+    expire_holds()
+    rid = active_round_id()
+    with connect() as c:
+        tickets = c.execute(
+            """SELECT t.id, t.number, t.user_id, u.name
+               FROM tickets t LEFT JOIN users u ON u.user_id=t.user_id
+               WHERE t.round_id=? AND t.status='confirmed'
+                 AND NOT EXISTS (
+                    SELECT 1 FROM random_winners w
+                    WHERE w.round_id=t.round_id AND w.user_id=t.user_id
+                 )
+               ORDER BY t.id""",
+            (rid,),
+        ).fetchall()
+        winners = c.execute(
+            """SELECT w.number, w.prize, w.created_at, u.name
+               FROM random_winners w LEFT JOIN users u ON u.user_id=w.user_id
+               WHERE w.round_id=? ORDER BY w.id DESC LIMIT 20""",
+            (rid,),
+        ).fetchall()
+    return web.json_response({
+        "round_id": rid,
+        "eligible_count": len(tickets),
+        "tickets": [{"id": r["id"], "number": r["number"], "name": r["name"] or "Ismi ko‘rsatilmagan"} for r in tickets],
+        "winners": [{"number": r["number"], "prize": r["prize"], "name": r["name"] or "Ismi ko‘rsatilmagan", "created_at": r["created_at"]} for r in winners],
+    })
+
+
+async def random_site_draw(request: web.Request):
+    if not random_site_authorized(request):
+        return web.json_response({"error": "Kalit noto‘g‘ri yoki RANDOM_SITE_KEY sozlanmagan."}, status=401)
+    try:
+        payload = await request.json()
+    except Exception:
+        return web.json_response({"error": "So‘rov formati noto‘g‘ri."}, status=400)
+    prize = str(payload.get("prize", "")).strip()
+    if not 2 <= len(prize) <= 250:
+        return web.json_response({"error": "Sovrin nomini 2–250 belgi oralig‘ida kiriting."}, status=400)
+    rid = active_round_id()
+    if rid is None:
+        return web.json_response({"error": "Faol o‘yin topilmadi."}, status=409)
+    try:
+        with connect() as c:
+            c.execute("BEGIN IMMEDIATE")
+            tickets = c.execute(
+                """SELECT t.id, t.number, t.user_id, u.name
+                   FROM tickets t LEFT JOIN users u ON u.user_id=t.user_id
+                   WHERE t.round_id=? AND t.status='confirmed'
+                     AND NOT EXISTS (
+                        SELECT 1 FROM random_winners w
+                        WHERE w.round_id=t.round_id AND w.user_id=t.user_id
+                     )
+                   ORDER BY t.id""",
+                (rid,),
+            ).fetchall()
+            if not tickets:
+                c.rollback()
+                return web.json_response({"error": "G‘olib tanlash uchun tasdiqlangan, hali yutmagan bilet topilmadi."}, status=409)
+            chosen = random.SystemRandom().choice(tickets)
+            c.execute(
+                "INSERT INTO random_winners(round_id,ticket_id,user_id,number,prize,created_at) VALUES(?,?,?,?,?,?)",
+                (rid, chosen["id"], chosen["user_id"], chosen["number"], prize, int(time.time())),
+            )
+            c.commit()
+    except sqlite3.IntegrityError:
+        return web.json_response({"error": "Bu ishtirokchi ushbu o‘yinda allaqachon g‘olib bo‘lgan. Yangilab qayta urinib ko‘ring."}, status=409)
+    try:
+        await bot.send_message(
+            chosen["user_id"],
+            "🎉 TABRIKLAYMIZ! 🎉\n\n"
+            "Siz OMADLI BILET o‘yinida random orqali g‘olib bo‘ldingiz!\n"
+            f"🎟 Bilet raqamingiz: {chosen['number']}\n"
+            f"🎁 Siz yutgan sovg‘a: {prize}\n\n"
+            "Sovrinni olish bo‘yicha batafsil ma’lumot uchun operator bilan bog‘laning."
+        )
+        notified = True
+    except Exception as exc:
+        log.warning("Random sayt orqali g‘olibga xabar yuborilmadi: %s", exc)
+        notified = False
+    return web.json_response({
+        "winner": {"number": chosen["number"], "name": chosen["name"] or "Ismi ko‘rsatilmagan", "prize": prize},
+        "notified": notified,
+        "message": "G‘olib saqlandi va Telegram xabari yuborildi." if notified else "G‘olib saqlandi, lekin Telegram xabari yuborilmadi. Foydalanuvchi botni ochganini tekshiring."
+    })
+
+
 async def start_web_server():
     # Render Web Service uchun PORT muhit o'zgaruvchisida beriladi.
     port = int(os.getenv("PORT", "10000"))
     app = web.Application()
+    app.router.add_get("/random", random_page)
+    app.router.add_get("/random/", random_page)
+    app.router.add_get("/random/api/state", random_site_state)
+    app.router.add_post("/random/api/draw", random_site_draw)
     app.router.add_get("/live", live_page)
     app.router.add_get("/live.html", live_page)
     app.router.add_get("/ws/live", live_websocket)
