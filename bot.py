@@ -118,7 +118,24 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, round_id INTEGER NOT NULL,
             ticket_id INTEGER NOT NULL, user_id INTEGER NOT NULL, number TEXT NOT NULL,
             prize TEXT NOT NULL, created_at INTEGER NOT NULL,
-            UNIQUE(round_id, ticket_id), UNIQUE(round_id, user_id))""")
+            UNIQUE(round_id, ticket_id))""")
+        # Old versions prevented the same user winning twice. Only the selected ticket
+        # should be consumed, so migrate away from the per-user unique constraint.
+        winner_schema = c.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='random_winners'"
+        ).fetchone()
+        if winner_schema and "UNIQUE(round_id, user_id)" in (winner_schema["sql"] or ""):
+            c.execute("ALTER TABLE random_winners RENAME TO random_winners_old")
+            c.execute("""CREATE TABLE random_winners(
+                id INTEGER PRIMARY KEY AUTOINCREMENT, round_id INTEGER NOT NULL,
+                ticket_id INTEGER NOT NULL, user_id INTEGER NOT NULL, number TEXT NOT NULL,
+                prize TEXT NOT NULL, created_at INTEGER NOT NULL,
+                UNIQUE(round_id, ticket_id))""")
+            c.execute("""INSERT OR IGNORE INTO random_winners
+                (id,round_id,ticket_id,user_id,number,prize,created_at)
+                SELECT id,round_id,ticket_id,user_id,number,prize,created_at
+                FROM random_winners_old ORDER BY id""")
+            c.execute("DROP TABLE random_winners_old")
         c.execute("""CREATE TABLE IF NOT EXISTS support_messages(
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL,
             message TEXT, created_at INTEGER NOT NULL)""")
@@ -668,17 +685,36 @@ async def random_spin(call: CallbackQuery, state: FSMContext):
     if not is_operator(call.from_user.id):
         await call.answer("Ruxsat yo‘q.", show_alert=True)
         return
+    rid = active_round_id()
     with connect() as c:
+        c.execute("BEGIN IMMEDIATE")
         tickets = c.execute(
             """SELECT t.id, t.number, t.user_id, u.name
                FROM tickets t LEFT JOIN users u ON u.user_id=t.user_id
                WHERE t.round_id=? AND t.status='confirmed'
+                 AND NOT EXISTS (
+                    SELECT 1 FROM random_winners w
+                    WHERE w.round_id=t.round_id AND w.ticket_id=t.id
+                 )
                ORDER BY t.id""",
-            (active_round_id(),),
+            (rid,),
         ).fetchall()
-    if not tickets:
-        await call.answer("Tasdiqlangan biletlar topilmadi.", show_alert=True)
-        return
+        if not tickets:
+            c.rollback()
+            await call.answer("🎟 BILETLAR TUGADI! Yangi o‘yin boshlanguncha random ishlamaydi.", show_alert=True)
+            await call.message.answer("🎟 BILETLAR TUGADI! Ushbu o‘yindagi barcha tasdiqlangan biletlar randomda bir martadan tanlandi. Yangi o‘yin boshlangach, random yana ishlaydi.")
+            return
+        chosen = random.SystemRandom().choice(tickets)
+        try:
+            c.execute(
+                "INSERT INTO random_winners(round_id,ticket_id,user_id,number,prize,created_at) VALUES(?,?,?,?,?,?)",
+                (rid, chosen["id"], chosen["user_id"], chosen["number"], "Sovrin belgilanmoqda", int(time.time())),
+            )
+            c.commit()
+        except sqlite3.IntegrityError:
+            c.rollback()
+            await call.answer("Bu bilet allaqachon tanlangan. Yangilab qayta urinib ko‘ring.", show_alert=True)
+            return
     await call.answer("Random aylantirilmoqda…")
     msg = call.message
     try:
@@ -692,9 +728,9 @@ async def random_spin(call: CallbackQuery, state: FSMContext):
             await asyncio.sleep(0.65)
     except Exception:
         pass
-    chosen = random.choice(tickets)
     await state.update_data(random_ticket_id=chosen["id"], random_user_id=chosen["user_id"],
-                             random_number=chosen["number"], random_name=chosen["name"] or "Ismi ko‘rsatilmagan")
+                             random_number=chosen["number"], random_name=chosen["name"] or "Ismi ko‘rsatilmagan",
+                             random_round_id=rid)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Yana aylantirish", callback_data="rnd:spin")],
         [InlineKeyboardButton(text="🎁 Sovrinni yozish va g‘olibga xabar yuborish", callback_data="rnd:prize")],
@@ -706,7 +742,7 @@ async def random_spin(call: CallbackQuery, state: FSMContext):
         "🎉 TASODIFIY TANLOV NATIJASI 🎉\n\n"
         f"🏅 Ishtirokchi: {chosen['name'] or 'Ismi ko‘rsatilmagan'}\n"
         f"🎟 Bilet raqami: {chosen['number']}\n\n"
-        "Bu hozircha tanlangan nomzod. Sovrin matnini kiritib, g‘olibga xabar yuborishingiz mumkin.",
+        "Bu bilet ushbu o‘yinda qayta tanlanmaydi. Sovrin matnini kiritib, g‘olibga xabar yuborishingiz mumkin.",
         reply_markup=kb,
     )
 
@@ -744,14 +780,23 @@ async def random_prize_send(message: Message, state: FSMContext):
         await state.clear()
         await message.answer("Tanlangan bilet topilmadi. Randomni qayta aylantiring.")
         return
+    rid = data.get("random_round_id")
     with connect() as c:
         valid = c.execute(
-            "SELECT id FROM tickets WHERE id=? AND round_id=? AND user_id=? AND number=? AND status='confirmed'",
-            (data.get("random_ticket_id"), active_round_id(), uid, number),
+            """SELECT t.id FROM tickets t JOIN random_winners w
+               ON w.ticket_id=t.id AND w.round_id=t.round_id
+               WHERE t.id=? AND t.round_id=? AND t.user_id=? AND t.number=?
+                 AND t.status='confirmed'""",
+            (data.get("random_ticket_id"), rid, uid, number),
         ).fetchone()
+        if valid:
+            c.execute(
+                "UPDATE random_winners SET prize=? WHERE round_id=? AND ticket_id=?",
+                (prize, rid, data.get("random_ticket_id")),
+            )
     if not valid:
         await state.clear()
-        await message.answer("Bu bilet joriy o‘yinda endi tasdiqlangan holatda emas. Randomni qayta aylantiring.")
+        await message.answer("Bu tanlangan bilet topilmadi. Randomni qayta aylantiring.")
         return
     try:
         await bot.send_message(
@@ -978,7 +1023,7 @@ async def random_site_state(request: web.Request):
                WHERE t.round_id=? AND t.status='confirmed'
                  AND NOT EXISTS (
                     SELECT 1 FROM random_winners w
-                    WHERE w.round_id=t.round_id AND w.user_id=t.user_id
+                    WHERE w.round_id=t.round_id AND w.ticket_id=t.id
                  )
                ORDER BY t.id""",
             (rid,),
@@ -1019,7 +1064,7 @@ async def random_site_draw(request: web.Request):
                    WHERE t.round_id=? AND t.status='confirmed'
                      AND NOT EXISTS (
                         SELECT 1 FROM random_winners w
-                        WHERE w.round_id=t.round_id AND w.user_id=t.user_id
+                        WHERE w.round_id=t.round_id AND w.ticket_id=t.id
                      )
                    ORDER BY t.id""",
                 (rid,),
