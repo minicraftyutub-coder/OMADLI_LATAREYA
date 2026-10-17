@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import random
 import sqlite3
 import time
 from io import BytesIO
@@ -50,6 +51,7 @@ class Operator(StatesGroup):
     card = State()
     broadcast = State()
     reply = State()
+    prize = State()
 
 
 def connect():
@@ -163,6 +165,7 @@ def operator_menu():
         [InlineKeyboardButton(text="💵 Chipta narxi", callback_data="op:price"), InlineKeyboardButton(text="💳 Karta raqami", callback_data="op:card")],
         [InlineKeyboardButton(text="⛔ Chipta olishni to‘xtatish", callback_data="op:stop"), InlineKeyboardButton(text="✅ Chipta olishni ochish", callback_data="op:open")],
         [InlineKeyboardButton(text="📣 Hammaga xabar", callback_data="op:broadcast")],
+        [InlineKeyboardButton(text="🎰 Random g‘olib aniqlash", callback_data="op:random")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="op:stats")],
         [InlineKeyboardButton(text="🧹 Joriy o‘yin chiptalarini o‘chirish", callback_data="op:clear")],
         [InlineKeyboardButton(text="🆕 Yangi o‘yin boshlash", callback_data="op:newround")],
@@ -582,6 +585,31 @@ async def op_action(call: CallbackQuery, state: FSMContext):
         set_setting("buying_open", "1"); await call.message.answer("✅ Chipta olish ochildi.")
     elif action == "broadcast":
         await call.message.answer("Barcha foydalanuvchilarga yuboriladigan matn yoki rasmni yuboring."); await state.set_state(Operator.broadcast)
+    elif action == "random":
+        with connect() as c:
+            tickets = c.execute(
+                """SELECT t.id, t.number, t.user_id, u.name
+                   FROM tickets t LEFT JOIN users u ON u.user_id=t.user_id
+                   WHERE t.round_id=? AND t.status='confirmed'
+                   ORDER BY t.id""",
+                (active_round_id(),),
+            ).fetchall()
+        if not tickets:
+            await call.message.answer("🎰 Hozircha tasdiqlangan bilet yo‘q. To‘lov tasdiqlangan biletlar paydo bo‘lgach random ishlaydi.")
+        else:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🎰 RANDOMNI AYLANTIRISH", callback_data="rnd:spin")],
+            ])
+            await call.message.answer(
+                "╔════════════════════╗\n"
+                "      👑 OMADLI BILET 👑\n"
+                "╚════════════════════╝\n\n"
+                "🎰 RANDOM G‘OLIB ANIQLASH\n"
+                f"🎟 Tasdiqlangan biletlar: {len(tickets)} ta\n\n"
+                "Operator randomni xohlagancha aylantirishi mumkin. "
+                "G‘olibga sovrin haqidagi xabar faqat sovrin matni kiritilgandan keyin yuboriladi.",
+                reply_markup=kb,
+            )
     elif action == "stats":
         with connect() as c:
             users = c.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
@@ -627,6 +655,118 @@ async def broadcast(message: Message, state: FSMContext):
     await message.answer("Xabar yuborilmoqda...")
     count = await broadcast_all(text, photo_id)
     await message.answer(f"✅ Xabar {count} ta foydalanuvchiga yuborildi.")
+    await state.clear()
+
+
+@dp.callback_query(F.data == "rnd:spin")
+async def random_spin(call: CallbackQuery, state: FSMContext):
+    if not is_operator(call.from_user.id):
+        await call.answer("Ruxsat yo‘q.", show_alert=True)
+        return
+    with connect() as c:
+        tickets = c.execute(
+            """SELECT t.id, t.number, t.user_id, u.name
+               FROM tickets t LEFT JOIN users u ON u.user_id=t.user_id
+               WHERE t.round_id=? AND t.status='confirmed'
+               ORDER BY t.id""",
+            (active_round_id(),),
+        ).fetchall()
+    if not tickets:
+        await call.answer("Tasdiqlangan biletlar topilmadi.", show_alert=True)
+        return
+    await call.answer("Random aylantirilmoqda…")
+    msg = call.message
+    try:
+        for frame in ["🎰 RANDOM ISHGA TUSHDI…", "🟡 🟡 🟡  OMADLI BILET", "🎟 BILET TANLANMOQDA…"]:
+            await msg.edit_text(
+                "╔════════════════════╗\n"
+                "      👑 OMADLI BILET 👑\n"
+                "╚════════════════════╝\n\n"
+                f"{frame}\n\n✨ Omadli bilet aniqlanmoqda…"
+            )
+            await asyncio.sleep(0.65)
+    except Exception:
+        pass
+    chosen = random.choice(tickets)
+    await state.update_data(random_ticket_id=chosen["id"], random_user_id=chosen["user_id"],
+                             random_number=chosen["number"], random_name=chosen["name"] or "Ismi ko‘rsatilmagan")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Yana aylantirish", callback_data="rnd:spin")],
+        [InlineKeyboardButton(text="🎁 Sovrinni yozish va g‘olibga xabar yuborish", callback_data="rnd:prize")],
+    ])
+    await msg.edit_text(
+        "╔════════════════════╗\n"
+        "      👑 OMADLI BILET 👑\n"
+        "╚════════════════════╝\n\n"
+        "🎉 TASODIFIY TANLOV NATIJASI 🎉\n\n"
+        f"🏅 Ishtirokchi: {chosen['name'] or 'Ismi ko‘rsatilmagan'}\n"
+        f"🎟 Bilet raqami: {chosen['number']}\n\n"
+        "Bu hozircha tanlangan nomzod. Sovrin matnini kiritib, g‘olibga xabar yuborishingiz mumkin.",
+        reply_markup=kb,
+    )
+
+
+@dp.callback_query(F.data == "rnd:prize")
+async def random_prize_prompt(call: CallbackQuery, state: FSMContext):
+    if not is_operator(call.from_user.id):
+        await call.answer("Ruxsat yo‘q.", show_alert=True)
+        return
+    data = await state.get_data()
+    if not data.get("random_user_id") or not data.get("random_number"):
+        await call.answer("Avval randomni aylantiring.", show_alert=True)
+        return
+    await state.set_state(Operator.prize)
+    await call.message.answer(
+        f"🎁 {data.get('random_name')} (bilet № {data.get('random_number')}) uchun sovrin nomini yozing.\n"
+        "Masalan: 500 000 so‘m. Shu matn g‘olibga Telegram orqali yuboriladi."
+    )
+    await call.answer()
+
+
+@dp.message(Operator.prize)
+async def random_prize_send(message: Message, state: FSMContext):
+    if not is_operator(message.from_user.id):
+        await state.clear()
+        return
+    prize = (message.text or "").strip()
+    if len(prize) < 2 or len(prize) > 250:
+        await message.answer("Sovrin nomini 2–250 ta belgi oralig‘ida yozing.")
+        return
+    data = await state.get_data()
+    uid = data.get("random_user_id")
+    number = data.get("random_number")
+    if not uid or not number:
+        await state.clear()
+        await message.answer("Tanlangan bilet topilmadi. Randomni qayta aylantiring.")
+        return
+    with connect() as c:
+        valid = c.execute(
+            "SELECT id FROM tickets WHERE id=? AND round_id=? AND user_id=? AND number=? AND status='confirmed'",
+            (data.get("random_ticket_id"), active_round_id(), uid, number),
+        ).fetchone()
+    if not valid:
+        await state.clear()
+        await message.answer("Bu bilet joriy o‘yinda endi tasdiqlangan holatda emas. Randomni qayta aylantiring.")
+        return
+    try:
+        await bot.send_message(
+            uid,
+            "🎉 TABRIKLAYMIZ! 🎉\n\n"
+            "Siz OMADLI BILET o‘yinida random orqali tanlandingiz!\n"
+            f"🎟 Bilet raqamingiz: {number}\n"
+            f"🎁 Siz yutgan sovg‘a: {prize}\n\n"
+            "Sovrinni olish bo‘yicha batafsil ma’lumot uchun operator bilan bog‘laning."
+        )
+    except Exception as exc:
+        await message.answer(f"❌ G‘olibga xabar yuborilmadi. Foydalanuvchi botni ochganini tekshiring. Tafsilot: {exc}")
+        await state.clear()
+        return
+    await message.answer(
+        "✅ G‘olibga Telegram xabari yuborildi!\n\n"
+        f"👤 {data.get('random_name')}\n"
+        f"🎟 Bilet: {number}\n"
+        f"🎁 Sovrin: {prize}"
+    )
     await state.clear()
 
 
