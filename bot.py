@@ -187,7 +187,7 @@ def operator_menu():
         [InlineKeyboardButton(text="💵 Chipta narxi", callback_data="op:price"), InlineKeyboardButton(text="💳 Karta raqami", callback_data="op:card")],
         [InlineKeyboardButton(text="⛔ Chipta olishni to‘xtatish", callback_data="op:stop"), InlineKeyboardButton(text="✅ Chipta olishni ochish", callback_data="op:open")],
         [InlineKeyboardButton(text="📣 Hammaga xabar", callback_data="op:broadcast")],
-        [InlineKeyboardButton(text="🎰 Random g‘olib aniqlash", callback_data="op:random")],
+        [InlineKeyboardButton(text="🎰 Random saytini ochish", url="https://omadli-latareya.onrender.com/random")],
         [InlineKeyboardButton(text="📊 Statistika", callback_data="op:stats")],
         [InlineKeyboardButton(text="🧹 Joriy o‘yin chiptalarini o‘chirish", callback_data="op:clear")],
         [InlineKeyboardButton(text="🆕 Yangi o‘yin boshlash", callback_data="op:newround")],
