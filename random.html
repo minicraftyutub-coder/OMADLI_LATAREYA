@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#090b14">
+<title>OMADLI BILET — Random</title>
+<style>
+:root{color-scheme:dark;--bg:#090b14;--panel:#111522;--line:#292e40;--gold:#f7c85b;--muted:#9da5bb;--text:#f7f8fc;--green:#77e5b1}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at 50% -10%,#303052 0%,#111321 38%,var(--bg) 72%);font-family:Inter,system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text);min-height:100vh}
+main{width:min(980px,100%);margin:auto;padding:28px 18px 48px}.brand{text-align:center;margin:8px 0 26px}.emblem{display:inline-grid;place-items:center;width:64px;height:64px;border:1px solid #78633b;border-radius:20px;background:linear-gradient(145deg,#3a2e19,#161521);font-size:30px;box-shadow:0 0 36px #f7c85b18}.eyebrow{color:var(--gold);font-size:12px;letter-spacing:.22em;font-weight:800;margin-top:15px}.brand h1{font-size:clamp(28px,5vw,45px);letter-spacing:.02em;margin:8px 0}.brand p{color:var(--muted);margin:0}.layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(250px,.8fr);gap:18px}.panel{background:linear-gradient(160deg,#171b2b,#10131e);border:1px solid var(--line);border-radius:24px;padding:23px;box-shadow:0 18px 55px #0003}.panel h2{margin:0 0 7px;font-size:19px}.muted{color:var(--muted);font-size:13px;line-height:1.55}.count{font-size:46px;font-weight:850;letter-spacing:-.04em;color:var(--gold);margin:17px 0 0}.count small{font-size:14px;letter-spacing:0;color:var(--muted);font-weight:600}.reel{margin:22px 0 18px;min-height:190px;border:1px solid #5a4b30;border-radius:20px;background:radial-gradient(ellipse at center,#3a2e1c55,transparent 70%),#0b0e17;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;overflow:hidden}.reel .ticket{font-size:12px;letter-spacing:.22em;color:var(--gold);font-weight:800}.reel .number{font-size:clamp(42px,8vw,68px);font-weight:900;letter-spacing:.08em;margin:8px 0;text-shadow:0 0 30px #f7c85b25;overflow-wrap:anywhere}.reel .name{font-size:16px;color:#e8eaf2}.reel.spinning .number{animation:pulse .18s infinite alternate}@keyframes pulse{from{transform:translateY(-2px);opacity:.65}to{transform:translateY(2px);opacity:1}}label{display:block;font-size:13px;color:#d8dced;margin:15px 0 7px}input{width:100%;padding:14px 13px;border:1px solid #343a4f;border-radius:12px;background:#0b0e17;color:white;font:inherit;outline:none}input:focus{border-color:var(--gold)}button{font:inherit;cursor:pointer;border:0;border-radius:13px;padding:14px 17px;font-weight:850;transition:transform .15s,opacity .15s}button:active{transform:scale(.985)}button:disabled{opacity:.45;cursor:not-allowed}.primary{width:100%;margin-top:13px;color:#231907;background:linear-gradient(110deg,#f8d87b,#e8ad38);box-shadow:0 8px 28px #e8ad3824}.secondary{color:#e6e9f5;background:#22283a;border:1px solid #343b52}.row{display:flex;gap:9px}.row button{white-space:nowrap}.status{font-size:13px;line-height:1.5;margin-top:12px;min-height:20px;color:var(--muted)}.status.error{color:#ff9b9b}.status.ok{color:var(--green)}.winner-list{display:flex;flex-direction:column;gap:9px;margin-top:15px}.winner{border:1px solid #2d3346;background:#0d111c;border-radius:13px;padding:12px}.winner strong{display:block;font-size:14px}.winner span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.prize{color:var(--gold)!important}.notice{border:1px solid #594b2f;background:#29221477;border-radius:13px;padding:12px;font-size:12px;color:#d9c99f;line-height:1.5;margin-top:17px}.footer{text-align:center;color:#6f778d;font-size:12px;margin-top:20px}
+@media(max-width:700px){main{padding:18px 12px 32px}.layout{grid-template-columns:1fr}.panel{padding:18px}.brand{margin-bottom:20px}.count{font-size:40px}}
+</style>
+</head>
+<body><main>
+<header class="brand"><div class="emblem">🎟️</div><div class="eyebrow">OMADLI BILET • RASMIY RANDOM</div><h1>OMADNI SINAB KO‘RING</h1><p>Tasdiqlangan biletlar orasidan tasodifiy g‘olib tanlash</p></header>
+<div class="layout">
+<section class="panel">
+<h2>🎰 G‘olibni aniqlash</h2><div class="muted">Random faqat Telegram botda to‘lovi operator tomonidan tasdiqlangan biletlarni hisobga oladi.</div>
+<div class="count" id="ticketCount">— <small>qatnashuvchi bilet</small></div>
+<div class="reel" id="reel"><div class="ticket">OMADLI BILET</div><div class="number" id="number">??????</div><div class="name" id="winnerName">G‘olib shu yerda ko‘rinadi</div></div>
+<label for="prize">🎁 Sovrin nomi</label><input id="prize" maxlength="250" placeholder="Masalan: 500 000 so‘m yoki sovg‘a nomi">
+<button class="primary" id="draw">✨ RANDOMNI BOSHLASH</button>
+<div class="status" id="status">Operator kalitini kiriting va biletlar ro‘yxatini yuklang.</div>
+<div class="notice">🔒 Operator kaliti faqat brauzer sessiyasida saqlanadi. Random serverda bajariladi; g‘olib natijasi saqlanadi. Bir o‘yinda bir ishtirokchi faqat bir marta g‘olib bo‘lishi mumkin.</div>
+</section>
+<aside class="panel">
+<h2>🏆 So‘nggi g‘oliblar</h2><div class="muted">Joriy o‘yinda aniqlangan g‘oliblar</div>
+<div class="winner-list" id="winners"><div class="muted">Natijalarni ko‘rish uchun operator kalitini kiriting.</div></div>
+<label for="key">🔑 Operator kaliti</label><div class="row"><input id="key" type="password" autocomplete="current-password" placeholder="RANDOM_SITE_KEY"><button class="secondary" id="connect">Ulash</button></div>
+<div class="status" id="connectStatus"></div>
+<button class="secondary" id="refresh" style="width:100%;margin-top:8px">↻ Biletlarni yangilash</button>
+</aside>
+</div><div class="footer">OMADLI BILET • Random natijasi serverda qayd etiladi</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let authKey=sessionStorage.getItem("randomSiteKey")||"";
+$("key").value=authKey;
+function setStatus(message,type=""){const el=$("status");el.textContent=message;el.className="status "+type}
+function safe(text){return String(text??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+async function api(path,options={}){const res=await fetch(path,{...options,headers:{"Authorization":"Bearer "+authKey,"Content-Type":"application/json",...(options.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.error||"Server bilan bog‘lanib bo‘lmadi.");return data}
+function renderWinners(items){const el=$("winners");if(!items.length){el.innerHTML='<div class="muted">Hozircha g‘olib aniqlanmagan.</div>';return}el.innerHTML=items.map(w=>'<div class="winner"><strong>🎟 № '+safe(w.number)+' · '+safe(w.name)+'</strong><span class="prize">🎁 '+safe(w.prize)+'</span></div>').join("")}
+async function refresh(){if(!authKey){$("connectStatus").textContent="Avval operator kalitini kiriting.";return}try{const d=await api("/random/api/state");$("ticketCount").innerHTML=d.eligible_count+' <small>qatnashuvchi bilet</small>' ;renderWinners(d.winners);$("connectStatus").textContent="Ulandi · "+d.eligible_count+" ta yutmagan tasdiqlangan bilet";$("connectStatus").className="status ok"}catch(e){$("connectStatus").textContent=e.message;$("connectStatus").className="status error"}}
+$("connect").addEventListener("click",async()=>{authKey=$("key").value.trim();if(!authKey){$("connectStatus").textContent="Operator kalitini kiriting.";return}sessionStorage.setItem("randomSiteKey",authKey);await refresh()});
+$("refresh").addEventListener("click",refresh);
+$("draw").addEventListener("click",async()=>{const prize=$("prize").value.trim();if(!authKey){setStatus("Avval operator kalitini kiriting.","error");return}if(prize.length<2){setStatus("Sovrin nomini kiriting.","error");$("prize").focus();return}const button=$("draw");button.disabled=true;$("reel").classList.add("spinning");setStatus("Tasodifiy g‘olib tanlanmoqda…");try{const state=await api("/random/api/state");if(!state.eligible_count)throw new Error("G‘olib tanlash uchun tasdiqlangan, hali yutmagan bilet yo‘q.");let i=0;const interval=setInterval(()=>{$("number").textContent=state.tickets.length?state.tickets[i++%state.tickets.length].number:"????";},75);await new Promise(r=>setTimeout(r,1600));clearInterval(interval);const d=await api("/random/api/draw",{method:"POST",body:JSON.stringify({prize})});$("number").textContent=d.winner.number;$("winnerName").textContent=d.winner.name+" — G‘OLIB!";$("reel").classList.remove("spinning");setStatus(d.message,d.notified?"ok":"error");await refresh()}catch(e){$("reel").classList.remove("spinning");setStatus(e.message,"error")}finally{button.disabled=false}});
+if(authKey)refresh();
+</script></body></html>
